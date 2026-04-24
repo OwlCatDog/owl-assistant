@@ -3,6 +3,7 @@ services:
     build: .
     container_name: owl-assistant-api
     restart: unless-stopped
+    init: true
     env_file:
       - .env
     network_mode: host

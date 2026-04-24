@@ -37,6 +37,9 @@ cp .env.example .env
 docker compose up --build -d
 ```
 
+Current compose uses `network_mode: host`, so container shares host network namespace.
+For local MariaDB running on host, `MYSQL_HOST=127.0.0.1` is valid.
+
 3. Logs:
 
 ```bash
