@@ -21,6 +21,8 @@ set -euo pipefail
 #   RUN_PRINT_TESTS=true
 #   TEST_PRINT_TEXT="hello from curl"
 #   TEST_PRINT_IMAGE=/absolute/path/to/test.png
+#   RUN_NEGATIVE_TESTS=true
+#   RUN_NEGATIVE_AUTH_TEST=true
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8080}"
 API_BASE="${BASE_URL%/}/api/v1"
@@ -37,8 +39,13 @@ OWL_AUTH_SALT="${OWL_AUTH_SALT:-}"
 RUN_PRINT_TESTS="${RUN_PRINT_TESTS:-false}"
 TEST_PRINT_TEXT="${TEST_PRINT_TEXT:-hello from curl}"
 TEST_PRINT_IMAGE="${TEST_PRINT_IMAGE:-}"
+RUN_NEGATIVE_TESTS="${RUN_NEGATIVE_TESTS:-true}"
+RUN_NEGATIVE_AUTH_TEST="${RUN_NEGATIVE_AUTH_TEST:-true}"
 
-COMMON_HEADERS=(-H "Content-Type: application/json")
+COMMON_HEADERS=()
+JSON_HEADERS=(-H "Content-Type: application/json")
+PUBLIC_HEADERS=()
+BAD_PUBLIC_HEADERS=()
 
 pp() {
   local tmp
@@ -59,91 +66,123 @@ if [[ "${SIMULATE_PUBLIC}" == "true" ]]; then
   fi
   TIME_WINDOW="$(( $(date +%s) / OWL_AUTH_WINDOW_SECONDS ))"
   OWL_AUTH_TOKEN="$(printf "%s:%s" "${TIME_WINDOW}" "${OWL_AUTH_SALT}" | sha256sum | awk '{print $1}')"
-  COMMON_HEADERS+=(
+  PUBLIC_HEADERS+=(
     -H "${FRP_PUBLIC_HEADER_NAME}: ${FRP_PUBLIC_HEADER_VALUE}"
     -H "${OWL_AUTH_HEADER_NAME}: ${OWL_AUTH_TOKEN}"
   )
+  BAD_PUBLIC_HEADERS+=(
+    -H "${FRP_PUBLIC_HEADER_NAME}: ${FRP_PUBLIC_HEADER_VALUE}"
+    -H "${OWL_AUTH_HEADER_NAME}: deadbeef"
+  )
 fi
 
-echo "== 1) healthz =="
-curl -sS "${BASE_URL%/}/healthz" | pp
-echo
+run_req() {
+  local title="$1"
+  local expected_http="$2"
+  shift 2
 
-echo "== 2) sensors latest =="
-curl -sS "${COMMON_HEADERS[@]}" "${API_BASE}/sensors/latest" | pp
-echo
+  echo "== ${title} =="
+  local out http body
+  out="$("$@" -w $'\n__HTTP_STATUS__:%{http_code}')"
+  http="$(printf '%s\n' "${out}" | tail -n1 | sed 's/^__HTTP_STATUS__://')"
+  body="$(printf '%s\n' "${out}" | sed '$d')"
+  echo "HTTP ${http}"
+  printf '%s\n' "${body}" | pp
+  echo
 
-echo "== 3) sensors history (inside) =="
-curl -sS "${COMMON_HEADERS[@]}" \
-  -X POST "${API_BASE}/sensors/history" \
-  -d "{\"sensor\":\"inside\",\"start\":\"${START_TIME}\",\"end\":\"${END_TIME}\"}" | pp
-echo
+  if [[ -n "${expected_http}" && "${http}" != "${expected_http}" ]]; then
+    echo "ERROR: expected HTTP ${expected_http}, got ${http}"
+    exit 1
+  fi
+}
 
-echo "== 4) sensors history (outside) =="
-curl -sS "${COMMON_HEADERS[@]}" \
-  -X POST "${API_BASE}/sensors/history" \
-  -d "{\"sensor\":\"outside\",\"start\":\"${START_TIME}\",\"end\":\"${END_TIME}\"}" | pp
-echo
+build_headers() {
+  local -n target_ref=$1
+  target_ref=()
+  target_ref+=("${COMMON_HEADERS[@]}")
+}
 
-echo "== 5) sensors history (darkin) =="
-curl -sS "${COMMON_HEADERS[@]}" \
-  -X POST "${API_BASE}/sensors/history" \
-  -d "{\"sensor\":\"darkin\",\"start\":\"${START_TIME}\",\"end\":\"${END_TIME}\"}" | pp
-echo
+HEADERS=()
+build_headers HEADERS
 
-echo "== 6) system raw: cpu_temp =="
-curl -sS "${COMMON_HEADERS[@]}" \
-  -X POST "${API_BASE}/system/raw" \
-  -d '{"req":"cpu_temp"}' | pp
-echo
+if [[ "${SIMULATE_PUBLIC}" == "true" ]]; then
+  HEADERS+=("${PUBLIC_HEADERS[@]}")
+fi
 
-echo "== 7) system raw: load_avg =="
-curl -sS "${COMMON_HEADERS[@]}" \
-  -X POST "${API_BASE}/system/raw" \
-  -d '{"req":"load_avg"}' | pp
-echo
+run_req "1) healthz" "200" curl -sS "${BASE_URL%/}/healthz"
+run_req "2) sensors latest" "200" curl -sS "${HEADERS[@]}" "${API_BASE}/sensors/latest"
 
-echo "== 8) system summary =="
-curl -sS "${COMMON_HEADERS[@]}" \
-  -X POST "${API_BASE}/system/summary" \
-  -d '{}' | pp
-echo
+run_req "3) sensors history (sensor=inside)" "200" \
+  curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/sensors/history" \
+  -d "{\"sensor\":\"inside\",\"start\":\"${START_TIME}\",\"end\":\"${END_TIME}\"}"
+run_req "4) sensors history (sensor=outside)" "200" \
+  curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/sensors/history" \
+  -d "{\"sensor\":\"outside\",\"start\":\"${START_TIME}\",\"end\":\"${END_TIME}\"}"
+run_req "5) sensors history (sensor=darkin)" "200" \
+  curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/sensors/history" \
+  -d "{\"sensor\":\"darkin\",\"start\":\"${START_TIME}\",\"end\":\"${END_TIME}\"}"
 
-echo "== 9) printer online =="
-curl -sS "${COMMON_HEADERS[@]}" \
-  -X POST "${API_BASE}/printer/online" \
-  -d '{}' | pp
-echo
+run_req "6) sensors history (db=inner_sensor)" "200" \
+  curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/sensors/history" \
+  -d "{\"db\":\"inner_sensor\",\"start\":\"${START_TIME}\",\"end\":\"${END_TIME}\"}"
+run_req "7) sensors history (db=out_sensor)" "200" \
+  curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/sensors/history" \
+  -d "{\"db\":\"out_sensor\",\"start\":\"${START_TIME}\",\"end\":\"${END_TIME}\"}"
+run_req "8) sensors history (db=darkin_sensor)" "200" \
+  curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/sensors/history" \
+  -d "{\"db\":\"darkin_sensor\",\"start\":\"${START_TIME}\",\"end\":\"${END_TIME}\"}"
+
+RAW_REQS=(cpu_utilization cpu_temp current_ram load_avg general_info cpu_info disk_partitions)
+idx=9
+for req in "${RAW_REQS[@]}"; do
+  run_req "${idx}) system raw: ${req}" "200" \
+    curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/system/raw" \
+    -d "{\"req\":\"${req}\"}"
+  idx=$((idx + 1))
+done
+
+run_req "${idx}) system summary" "200" \
+  curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/system/summary" -d '{}'
+idx=$((idx + 1))
+
+run_req "${idx}) printer online" "200" \
+  curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/printer/online" -d '{}'
+idx=$((idx + 1))
 
 if [[ "${RUN_PRINT_TESTS}" == "true" ]]; then
-  echo "== 10) printer system-ticket (will print) =="
-  curl -sS "${COMMON_HEADERS[@]}" \
-    -X POST "${API_BASE}/printer/system-ticket" \
-    -d '{}' | pp
-  echo
+  run_req "${idx}) printer system-ticket (will print)" "200" \
+    curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/printer/system-ticket" -d '{}'
+  idx=$((idx + 1))
 
-  echo "== 11) printer print text (will print) =="
-  CURL_PRINT_HEADERS=()
-  if [[ "${SIMULATE_PUBLIC}" == "true" ]]; then
-    CURL_PRINT_HEADERS+=(
-      -H "${FRP_PUBLIC_HEADER_NAME}: ${FRP_PUBLIC_HEADER_VALUE}"
-      -H "${OWL_AUTH_HEADER_NAME}: ${OWL_AUTH_TOKEN}"
-    )
-  fi
-  curl -sS "${CURL_PRINT_HEADERS[@]}" \
-    -X POST "${API_BASE}/printer/print" \
-    --data-urlencode "file=${TEST_PRINT_TEXT}" | pp
-  echo
+  run_req "${idx}) printer print text (will print)" "200" \
+    curl -sS "${HEADERS[@]}" -X POST "${API_BASE}/printer/print" --data-urlencode "file=${TEST_PRINT_TEXT}"
+  idx=$((idx + 1))
 
   if [[ -n "${TEST_PRINT_IMAGE}" && -f "${TEST_PRINT_IMAGE}" ]]; then
-    echo "== 12) printer print image (will print) =="
-    curl -sS "${CURL_PRINT_HEADERS[@]}" \
-      -X POST "${API_BASE}/printer/print" \
-      -F "file=@${TEST_PRINT_IMAGE}" | pp
-    echo
+    run_req "${idx}) printer print image (will print)" "200" \
+      curl -sS "${HEADERS[@]}" -X POST "${API_BASE}/printer/print" -F "file=@${TEST_PRINT_IMAGE}"
+    idx=$((idx + 1))
   else
     echo "skip image print: TEST_PRINT_IMAGE is empty or file not found"
+    echo
   fi
+fi
+
+if [[ "${RUN_NEGATIVE_TESTS}" == "true" ]]; then
+  run_req "${idx}) negative: system raw unknown req" "400" \
+    curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/system/raw" -d '{"req":"unknown_raw"}'
+  idx=$((idx + 1))
+
+  run_req "${idx}) negative: sensors history invalid sensor" "400" \
+    curl -sS "${HEADERS[@]}" "${JSON_HEADERS[@]}" -X POST "${API_BASE}/sensors/history" \
+    -d "{\"sensor\":\"invalid_sensor\",\"start\":\"${START_TIME}\",\"end\":\"${END_TIME}\"}"
+  idx=$((idx + 1))
+fi
+
+if [[ "${SIMULATE_PUBLIC}" == "true" && "${RUN_NEGATIVE_AUTH_TEST}" == "true" ]]; then
+  run_req "${idx}) negative auth: wrong owl-auth-token" "401" \
+    curl -sS "${COMMON_HEADERS[@]}" "${BAD_PUBLIC_HEADERS[@]}" "${API_BASE}/sensors/latest"
+  idx=$((idx + 1))
 fi
 
 echo "Done."
