@@ -1,7 +1,10 @@
 import io
+import hashlib
+import hmac
 import os
 import platform
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -14,6 +17,7 @@ import usb.core
 from escpos.printer import Usb as EscposUsb
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from PIL import Image
 
@@ -36,6 +40,13 @@ def _env_str(name: str, default: str) -> str:
     return raw.strip()
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass
 class Settings:
     api_host: str
@@ -51,6 +62,14 @@ class Settings:
     thermal_printer_vid: int
     thermal_printer_pid: int
     thermal_print_width: int
+    owl_auth_enabled: bool
+    owl_auth_salt: str
+    owl_auth_window_seconds: int
+    owl_auth_clock_skew_windows: int
+    owl_auth_header_name: str
+    frp_public_header_name: str
+    frp_public_header_value: str
+    trust_x_forwarded_for_as_public: bool
 
     @staticmethod
     def load() -> "Settings":
@@ -68,6 +87,14 @@ class Settings:
             thermal_printer_vid=int(_env_str("THERMAL_PRINTER_VID", "0x0416"), 0),
             thermal_printer_pid=int(_env_str("THERMAL_PRINTER_PID", "0x5011"), 0),
             thermal_print_width=_env_int("THERMAL_PRINT_WIDTH", 400),
+            owl_auth_enabled=_env_bool("OWL_AUTH_ENABLED", True),
+            owl_auth_salt=_env_str("OWL_AUTH_SALT", ""),
+            owl_auth_window_seconds=_env_int("OWL_AUTH_WINDOW_SECONDS", 120),
+            owl_auth_clock_skew_windows=_env_int("OWL_AUTH_CLOCK_SKEW_WINDOWS", 1),
+            owl_auth_header_name=_env_str("OWL_AUTH_HEADER_NAME", "owl-auth-token"),
+            frp_public_header_name=_env_str("FRP_PUBLIC_HEADER_NAME", "x-owl-via-frp"),
+            frp_public_header_value=_env_str("FRP_PUBLIC_HEADER_VALUE", "1"),
+            trust_x_forwarded_for_as_public=_env_bool("TRUST_X_FORWARDED_FOR_AS_PUBLIC", False),
         )
 
 
@@ -166,6 +193,56 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _is_public_via_frp(request: Request) -> bool:
+    header_val = request.headers.get(settings.frp_public_header_name)
+    if header_val is not None:
+        expected = settings.frp_public_header_value
+        if expected == "" or header_val.strip().lower() == expected.strip().lower():
+            return True
+    if settings.trust_x_forwarded_for_as_public and request.headers.get("x-forwarded-for"):
+        return True
+    return False
+
+
+def _build_owl_auth_token(unix_ts: int, salt: str, window_seconds: int) -> str:
+    time_window = unix_ts // max(1, window_seconds)
+    raw = f"{time_window}:{salt}".encode("utf-8")
+    return hashlib.sha256(raw).hexdigest().lower()
+
+
+def _validate_owl_auth_token(token: str) -> bool:
+    salt = settings.owl_auth_salt
+    if salt == "":
+        return False
+    now = int(time.time())
+    for i in range(-settings.owl_auth_clock_skew_windows, settings.owl_auth_clock_skew_windows + 1):
+        expected = _build_owl_auth_token(now + i * settings.owl_auth_window_seconds, salt, settings.owl_auth_window_seconds)
+        if hmac.compare_digest(token.strip().lower(), expected):
+            return True
+    return False
+
+
+@app.middleware("http")
+async def owl_auth_middleware(request: Request, call_next):
+    if not settings.owl_auth_enabled:
+        return await call_next(request)
+
+    if request.url.path == "/healthz":
+        return await call_next(request)
+
+    if not _is_public_via_frp(request):
+        return await call_next(request)
+
+    if settings.owl_auth_salt == "":
+        return JSONResponse(status_code=503, content={"detail": "OWL_AUTH_SALT not configured"})
+
+    token = request.headers.get(settings.owl_auth_header_name)
+    if token is None or not _validate_owl_auth_token(token):
+        return JSONResponse(status_code=401, content={"detail": "invalid owl-auth-token"})
+
+    return await call_next(request)
 
 
 def _to_unix_seconds(ts: datetime | None) -> int:
@@ -565,4 +642,3 @@ async def printer_print(
         return {"code": 200}
 
     return {"code": 500, "msg": "文件类型未知"}
-

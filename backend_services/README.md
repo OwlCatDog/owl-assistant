@@ -50,3 +50,26 @@ docker compose logs -f
 - `device_cgroup_rules: "c 189:* rmw"`
 
 This is needed for pyusb/libusb access to USB device nodes in containers.
+
+## Public (FRP) auth
+
+Backend includes `owl-auth-token` validation middleware.
+
+- It only validates token when request is considered "public via FRP".
+- Default public detector: header `x-owl-via-frp: 1`.
+- Token algorithm matches Avalonia client:
+  - `sha256("<unix_time//120>:<OWL_AUTH_SALT>").lower()`
+  - Backend accepts current window and neighbor windows (clock skew).
+
+Recommended FRP config (`frpc.toml`, `type = "http"`):
+
+```toml
+[[proxies]]
+name = "owl-api"
+type = "http"
+localPort = 8080
+customDomains = ["api.example.com"]
+requestHeaders.set.x-owl-via-frp = "1"
+```
+
+`X-Forwarded-For` may exist in FRP HTTP mode, but default backend does not rely on it for public detection.
