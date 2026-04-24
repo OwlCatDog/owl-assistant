@@ -566,7 +566,7 @@ def get_sensors_history(payload: SensorHistoryRequest):
 def get_system_raw(payload: RawInfoRequest):
     req = payload.req.strip().lower()
     if req == "cpu_utilization":
-        return {"code": 200, "data": f"{psutil.cpu_percent(interval=0.2):.1f}"}
+        return {"code": 200, "data": f"{psutil.cpu_percent(interval=1):.1f}"}
     if req == "cpu_temp":
         return {"code": 200, "data": _cpu_temp()}
     if req == "current_ram":
