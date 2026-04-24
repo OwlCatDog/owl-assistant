@@ -6,37 +6,27 @@ public class GlobalCfg
 
     public static bool UseFrp { get; set; } = false;
     
-    public static string GlobalAddr  { get; set; } = "http://scan.mrowl.xyz:8056/";
+    private static string _apiBaseUrl = "http://scan.mrowl.xyz:8080/api/v1/";
     
-    public static string GlobalSensorAddr { get; set; }  = "http://scan.mrowl.xyz:3649/";
+    public static string ApiBaseUrl
+    {
+        get => _apiBaseUrl.EndsWith("/") ? _apiBaseUrl : $"{_apiBaseUrl}/";
+        set => _apiBaseUrl = value;
+    }
     
-    // public static string GlobalATISAddr = "http://scan.mrowl.xyz:9352/";
-
-    public static string SysCompleteInfo => $"{GlobalAddr}thermal/fetchInfo";
+    public static string SysCompleteInfo => $"{ApiBaseUrl}system/summary";
     
-    public static string RawInfo => $"{GlobalAddr}thermal/rawInfo";
+    public static string RawInfo => $"{ApiBaseUrl}system/raw";
     
-    public static string ThermalOnline => $"{GlobalAddr}thermal/online";
+    public static string ThermalOnline => $"{ApiBaseUrl}printer/online";
     
-    public static string ThermalSysPrint => $"{GlobalAddr}thermal/sysPrint";
+    public static string ThermalSysPrint => $"{ApiBaseUrl}printer/system-ticket";
     
-    public static string ThermalPrint => $"{GlobalAddr}thermal/upload";
+    public static string ThermalPrint => $"{ApiBaseUrl}printer/print";
     
-    public static string SensorData => $"{GlobalSensorAddr}getSensor";
+    public static string SensorData => $"{ApiBaseUrl}sensors/latest";
     
-    public static string SensorDataRange => $"{GlobalSensorAddr}getSensorDataByDateRange";
-    
-    public static string ATISModifyFM  => $"{GlobalAddr}fm/modifyFM";
-    
-    public static string ATISModifyVolume => $"{GlobalAddr}fm/volume";
-    
-    public static string ATISStartStop => $"{GlobalAddr}fm/control";
-    
-    public static string ATISVolInfo => $"{GlobalAddr}fm/curVol";
-    
-    public static string ATISChgSong => $"{GlobalAddr}fm/chgSong";
-    
-    public static string ATISUploadRecording => $"{GlobalAddr}fm/rec";
+    public static string SensorDataRange => $"{ApiBaseUrl}sensors/history";
     
     public static int RawInfoInterval => 5;
 

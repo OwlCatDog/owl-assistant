@@ -104,22 +104,6 @@
                 <views:PrintInfoView DataContext="{Binding PrintInfoViewModel}" />
             </TabItem>
 
-            <!-- ATIS Settings Tab -->
-            <TabItem>
-                <TabItem.Header>
-                    <StackPanel Orientation="Vertical" 
-                               HorizontalAlignment="Center"
-                               Spacing="4">
-                        <avalonia:MaterialIcon Kind="RadioFm" 
-                                              Width="24" 
-                                              Height="24" />
-                        <TextBlock Text="ATIS" 
-                                  FontSize="11" 
-                                  TextAlignment="Center" />
-                    </StackPanel>
-                </TabItem.Header>
-                <views:ATISInfoView DataContext="{Binding AtisInfoViewModel}" />
-            </TabItem>
         </TabControl>
     </DockPanel>
 </UserControl>

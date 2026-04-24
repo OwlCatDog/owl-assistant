@@ -45,12 +45,11 @@ public partial class App : Application
                     .PostJsonAsync(new { })
                     .ReceiveString();
             }
-            catch (Exception e)
+            catch (Exception)
             {
                 // use global
                 Log.Error("Using fallback url");
-                GlobalCfg.GlobalAddr = $"(SECRET)";
-                GlobalCfg.GlobalSensorAddr = $"(SECRET)";
+                GlobalCfg.ApiBaseUrl = $"(SECRET)";
                 GlobalCfg.UseFrp = true;
             }
         });

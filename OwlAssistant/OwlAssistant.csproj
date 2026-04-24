@@ -23,7 +23,6 @@
         <PackageReference Include="Flurl.Http" />
         <PackageReference Include="Material.Icons.Avalonia" />
         <PackageReference Include="Newtonsoft.Json" />
-        <PackageReference Include="Plugin.AudioRecorder" />
         <PackageReference Include="ReactiveUI.Fody" />
         <PackageReference Include="ScottPlot.Avalonia" />
         <PackageReference Include="Serilog.Sinks.Console" />
@@ -34,10 +33,6 @@
     <ItemGroup>
       <Compile Update="Views\SensorInfoView.axaml.cs">
         <DependentUpon>SensorInfoView.axaml</DependentUpon>
-        <SubType>Code</SubType>
-      </Compile>
-      <Compile Update="Views\ATISInfoView.axaml.cs">
-        <DependentUpon>ATISInfoView.axaml</DependentUpon>
         <SubType>Code</SubType>
       </Compile>
     </ItemGroup>
